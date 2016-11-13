@@ -1,0 +1,34 @@
+apply plugin: 'java'
+apply plugin: 'eclipse'
+apply plugin: 'application'
+
+repositories {
+    maven { url 'https://repo.gradle.org/gradle/libs-releases' }
+    mavenCentral()
+}
+
+dependencies {
+    compile (
+        'org.gradle:gradle-tooling-api:2.6',
+        'com.amazonaws:aws-lambda-java-core:1.1.0',
+        'com.amazonaws:aws-java-sdk-codepipeline:1.11.49',
+        'com.amazonaws:aws-java-sdk-s3:1.11.49'
+     )
+    runtime 'org.slf4j:slf4j-simple:1.7.10'
+}
+
+task execute(type:JavaExec) {
+   main = 'net.adamsmolnik.jpb.PackageBuilderHandler'
+}
+
+task buildZip(type: Zip) {
+    from compileJava
+    from processResources              
+    into('lib') {
+        from configurations.runtime
+    }           
+}
+
+build.dependsOn buildZip
+
+mainClassName = 'net.adamsmolnik.jpb.PackageBuilderHandler'
