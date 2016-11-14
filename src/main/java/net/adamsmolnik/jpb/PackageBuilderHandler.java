@@ -77,7 +77,7 @@ public class PackageBuilderHandler {
 			log.log("input: " + ias.bucketName + "/" + ias.objectKey);
 			String[] keyParts = ias.objectKey.split("/");
 			Path workDir = Files.createDirectories(TMP.resolve(keyParts[keyParts.length - 1]));
-			Path zippedArifact = zip(build(extract(ias, workDir), log));
+			Path zippedArifact = zip(buildWar(extract(ias, workDir), log), workDir);
 			ObjectMetadata om = new ObjectMetadata();
 			om.setSSEAlgorithm(ObjectMetadata.AES_256_SERVER_SIDE_ENCRYPTION);
 			PutObjectRequest por = new PutObjectRequest(oas.bucketName, oas.objectKey, zippedArifact.toFile());
@@ -135,7 +135,7 @@ public class PackageBuilderHandler {
 		return dirToExtract;
 	}
 
-	private static Path build(Path workDir, LambdaLogger logger) throws IOException {
+	private static Path buildWar(Path workDir, LambdaLogger logger) throws IOException {
 		String absWorkDir = workDir.toAbsolutePath().toString();
 		logger.log("workDir: " + absWorkDir);
 		GradleConnector connector = GradleConnector.newConnector();
@@ -152,23 +152,36 @@ public class PackageBuilderHandler {
 			connection.close();
 		}
 		PathMatcher matcher = FileSystems.getDefault().getPathMatcher("glob:**.war");
-		Path builtArtifact = Files.find(workDir.resolve("build/libs"), 1, (p, a) -> a.isRegularFile() && matcher.matches(p)).findFirst().get();
-		return builtArtifact;
+		Path warFile = Files.find(workDir.resolve("build/libs"), 1, (p, a) -> a.isRegularFile() && matcher.matches(p)).findFirst().get();
+		return warFile;
 	}
 
-	private static Path zip(Path file) throws IOException {
-		byte[] buffer = new byte[8192];
-		Path zippedArifact = file.getParent().resolve(file.getFileName().toString() + ".zip");
-		try (InputStream is = Files.newInputStream(file);
-				ZipOutputStream zos = new ZipOutputStream(new BufferedOutputStream(Files.newOutputStream(zippedArifact)))) {
-			zos.putNextEntry(new ZipEntry(file.getFileName().toString()));
-			int len;
-			while ((len = is.read(buffer)) != -1) {
-				zos.write(buffer, 0, len);
-			}
-			zos.closeEntry();
+	private static Path zip(Path warFile, Path workDir) throws IOException {
+		Path output = TMP.resolve("output.zip");
+		try (ZipOutputStream zos = new ZipOutputStream(new BufferedOutputStream(Files.newOutputStream(output)))) {
+			String appSpec = "appspec.yml";
+			writeFileToZip(workDir.resolve(appSpec), appSpec, zos);
+			String scriptsDir = "scripts";
+			Files.newDirectoryStream(workDir.resolve("scripts")).forEach(p -> writeFileToZip(p, scriptsDir + "/" + p.getFileName(), zos));
+			writeFileToZip(warFile, warFile.getFileName().toString(), zos);
 		}
-		return zippedArifact;
+		return output;
+	}
+
+	private static void writeFileToZip(Path path, String entryName, ZipOutputStream zos) {
+		try {
+			zos.putNextEntry(new ZipEntry(entryName));
+			byte[] buffer = new byte[8192];
+			try (InputStream is = Files.newInputStream(path)) {
+				int len;
+				while ((len = is.read(buffer)) != -1) {
+					zos.write(buffer, 0, len);
+				}
+				zos.closeEntry();
+			}
+		} catch (IOException e) {
+			throw new PackageBuilderException(e);
+		}
 	}
 
 	private S3Object getS3Object(String key, Map<String, Object> map) {
