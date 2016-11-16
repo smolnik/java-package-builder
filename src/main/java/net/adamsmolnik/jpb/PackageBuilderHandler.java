@@ -1,8 +1,10 @@
 package net.adamsmolnik.jpb;
 
+import static net.adamsmolnik.jpb.Utils.deleteQuietlyRecursively;
+import static net.adamsmolnik.jpb.Utils.writeFileToZip;
+
 import java.io.BufferedOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.FileStore;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
@@ -48,6 +50,8 @@ public class PackageBuilderHandler {
 
 	private static final String GRADLE_DIR = "gradle";
 
+	private static final String JDK_DIR = "jdk";
+
 	private static final String PACKAGE_BUILDER_BUCKET_NAME = "java-package-builder";
 
 	private static class S3Object {
@@ -69,6 +73,7 @@ public class PackageBuilderHandler {
 		LambdaLogger log = context.getLogger();
 		Map<String, Object> jobMap = getMap(eventMap, "CodePipeline.job");
 		String jobId = getValue("id", jobMap);
+		Path workDir = null;
 		try {
 			setUp(log);
 			Map<String, Object> data = getMap(jobMap, "data");
@@ -76,7 +81,7 @@ public class PackageBuilderHandler {
 			S3Object oas = getS3Object("outputArtifacts", data);
 			log.log("input: " + ias.bucketName + "/" + ias.objectKey);
 			String[] keyParts = ias.objectKey.split("/");
-			Path workDir = Files.createDirectories(TMP.resolve(keyParts[keyParts.length - 1]));
+			workDir = Files.createDirectories(TMP.resolve(keyParts[keyParts.length - 1]));
 			Path zippedArifact = zip(buildWar(extract(ias, workDir), log), workDir);
 			ObjectMetadata om = new ObjectMetadata();
 			om.setSSEAlgorithm(ObjectMetadata.AES_256_SERVER_SIDE_ENCRYPTION);
@@ -93,26 +98,35 @@ public class PackageBuilderHandler {
 			t.printStackTrace();
 			throw new PackageBuilderException(t);
 		} finally {
-			// TODO clean up
+			deleteQuietlyRecursively(workDir, false);
 		}
 
 	}
 
-	private void logSpaceUsed(LambdaLogger log) throws IOException {
+	private void logSpaceUsed(LambdaLogger log, String prefix) throws IOException {
 		FileStore fs = Files.getFileStore(TMP);
-		log.log("total space: " + fs.getTotalSpace() + ", unallocated space: " + fs.getUnallocatedSpace() + ", usable space:" + fs.getUsableSpace());
+		log.log(prefix + " total space: " + fs.getTotalSpace() + ", unallocated space: " + fs.getUnallocatedSpace() + ", usable space:"
+				+ fs.getUsableSpace());
 	}
 
 	private void setUp(LambdaLogger log) throws IOException {
 		try {
-			logSpaceUsed(log);
-			extract(new S3Object(PACKAGE_BUILDER_BUCKET_NAME, "gradle-3.1-bin.zip"), TMP);
-			extract(new S3Object(PACKAGE_BUILDER_BUCKET_NAME, "jdk.zip"), TMP);
-			Files.setPosixFilePermissions(TMP.resolve("jdk/bin/java"), PosixFilePermissions.fromString("rwxr-xr-x"));
+			logSpaceUsed(log, "before setup");
+			log.log(TMP + " dir contents before execution:");
+			Files.newDirectoryStream(TMP).forEach(p -> log.log(p.toString()));
+			boolean gradleDirNotExists, jdkDirNotExists;
+			if (gradleDirNotExists = Files.notExists(TMP.resolve(GRADLE_DIR))) {
+				extract(new S3Object(PACKAGE_BUILDER_BUCKET_NAME, "gradle-3.1-bin.zip"), TMP);
+			}
+			if (jdkDirNotExists = Files.notExists(TMP.resolve(JDK_DIR))) {
+				extract(new S3Object(PACKAGE_BUILDER_BUCKET_NAME, "jdk.zip"), TMP);
+				Files.setPosixFilePermissions(TMP.resolve("jdk/bin/java"), PosixFilePermissions.fromString("rwxr-xr-x"));
+			}
+			log.log("gradleDirExists: " + !gradleDirNotExists + ", jdkDirExists: " + !jdkDirNotExists);
 		} catch (IOException e) {
 			throw new PackageBuilderException(e);
 		} finally {
-			logSpaceUsed(log);
+			logSpaceUsed(log, "after setup");
 		}
 	}
 
@@ -166,22 +180,6 @@ public class PackageBuilderHandler {
 			writeFileToZip(warFile, warFile.getFileName().toString(), zos);
 		}
 		return output;
-	}
-
-	private static void writeFileToZip(Path path, String entryName, ZipOutputStream zos) {
-		try {
-			zos.putNextEntry(new ZipEntry(entryName));
-			byte[] buffer = new byte[8192];
-			try (InputStream is = Files.newInputStream(path)) {
-				int len;
-				while ((len = is.read(buffer)) != -1) {
-					zos.write(buffer, 0, len);
-				}
-				zos.closeEntry();
-			}
-		} catch (IOException e) {
-			throw new PackageBuilderException(e);
-		}
 	}
 
 	private S3Object getS3Object(String key, Map<String, Object> map) {
