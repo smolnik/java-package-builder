@@ -1,0 +1,94 @@
+{
+    "pipeline": {
+        "roleArn": "arn:aws:iam::542175458111:role/AWS-CodePipeline-Service", 
+        "stages": [
+            {
+                "name": "Source", 
+                "actions": [
+                    {
+                        "inputArtifacts": [], 
+                        "name": "GitHub-Source", 
+                        "actionTypeId": {
+                            "category": "Source", 
+                            "owner": "ThirdParty", 
+                            "version": "1", 
+                            "provider": "GitHub"
+                        }, 
+                        "outputArtifacts": [
+                            {
+                                "name": "messenger"
+                            }
+                        ], 
+                        "configuration": {
+                            "Owner": "smolnik", 
+                            "Repo": "messenger", 
+                            "Branch": "master", 
+                            "OAuthToken": "****"
+                        }, 
+                        "runOrder": 1
+                    }
+                ]
+            }, 
+            {
+                "name": "Java-Package-Build", 
+                "actions": [
+                    {
+                        "inputArtifacts": [
+                            {
+                                "name": "messenger"
+                            }
+                        ], 
+                        "name": "Java-Package-Build", 
+                        "actionTypeId": {
+                            "category": "Invoke", 
+                            "owner": "AWS", 
+                            "version": "1", 
+                            "provider": "Lambda"
+                        }, 
+                        "outputArtifacts": [
+                            {
+                                "name": "messenger-war"
+                            }
+                        ], 
+                        "configuration": {
+                            "FunctionName": "java-package-builder", 
+                            "UserParameters": "evnType:testing"
+                        }, 
+                        "runOrder": 1
+                    }
+                ]
+            }, 
+            {
+                "name": "Deploy", 
+                "actions": [
+                    {
+                        "inputArtifacts": [
+                            {
+                                "name": "messenger-war"
+                            }
+                        ], 
+                        "name": "Deploy", 
+                        "actionTypeId": {
+                            "category": "Deploy", 
+                            "owner": "AWS", 
+                            "version": "1", 
+                            "provider": "CodeDeploy"
+                        }, 
+                        "outputArtifacts": [], 
+                        "configuration": {
+                            "ApplicationName": "messenger", 
+                            "DeploymentGroupName": "testing"
+                        }, 
+                        "runOrder": 1
+                    }
+                ]
+            }
+        ], 
+        "artifactStore": {
+            "type": "S3", 
+            "location": "codepipeline-us-east-1-606937492037"
+        }, 
+        "name": "messenger-pipeline", 
+        "version": 5
+    }
+}
