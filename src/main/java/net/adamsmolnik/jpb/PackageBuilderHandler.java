@@ -1,7 +1,6 @@
 package net.adamsmolnik.jpb;
 
-import static net.adamsmolnik.jpb.Utils.deleteQuietlyRecursively;
-import static net.adamsmolnik.jpb.Utils.writeFileToZip;
+import static net.adamsmolnik.jpb.Utils.*;
 
 import java.io.BufferedOutputStream;
 import java.io.IOException;
@@ -65,6 +64,8 @@ public class PackageBuilderHandler {
 
 	}
 
+	private Path output = TMP.resolve("output.zip");
+
 	private final AWSCodePipeline cp = new AWSCodePipelineClient();
 
 	private final AmazonS3 s3 = new AmazonS3Client();
@@ -82,7 +83,7 @@ public class PackageBuilderHandler {
 			log.log("input: " + ias.bucketName + "/" + ias.objectKey);
 			String[] keyParts = ias.objectKey.split("/");
 			workDir = Files.createDirectories(TMP.resolve(keyParts[keyParts.length - 1]));
-			Path zippedArifact = zip(buildWar(extract(ias, workDir), log), workDir);
+			Path zippedArifact = zip(buildWar(extract(ias, workDir), log), workDir, output);
 			ObjectMetadata om = new ObjectMetadata();
 			om.setSSEAlgorithm(ObjectMetadata.AES_256_SERVER_SIDE_ENCRYPTION);
 			PutObjectRequest por = new PutObjectRequest(oas.bucketName, oas.objectKey, zippedArifact.toFile());
@@ -99,6 +100,7 @@ public class PackageBuilderHandler {
 			throw new PackageBuilderException(t);
 		} finally {
 			deleteQuietlyRecursively(workDir, false);
+			deleteFileQuietly(output);
 		}
 
 	}
@@ -170,8 +172,7 @@ public class PackageBuilderHandler {
 		return warFile;
 	}
 
-	private static Path zip(Path warFile, Path workDir) throws IOException {
-		Path output = TMP.resolve("output.zip");
+	private static Path zip(Path warFile, Path workDir, Path output) throws IOException {
 		try (ZipOutputStream zos = new ZipOutputStream(new BufferedOutputStream(Files.newOutputStream(output)))) {
 			String appSpec = "appspec.yml";
 			writeFileToZip(workDir.resolve(appSpec), appSpec, zos);

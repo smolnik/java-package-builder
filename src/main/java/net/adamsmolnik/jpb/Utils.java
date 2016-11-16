@@ -36,6 +36,14 @@ public class Utils {
 		}
 	}
 
+	static void deleteFileQuietly(Path file) {
+		try {
+			Files.delete(file);
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+	}
+
 	static void deleteQuietlyRecursively(Path dir, boolean dirExcluded) {
 		if (dir == null) {
 			return;
